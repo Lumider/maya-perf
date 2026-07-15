@@ -1,0 +1,17 @@
+{
+  "name": "maya-perf",
+  "version": "1.0.0",
+  "description": "Seguimiento continuo de la auditoría de performance móvil de Maya (Yanbal) con Lighthouse.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "perf": "node scripts/lighthouse-maya.mjs"
+  },
+  "devDependencies": {
+    "chrome-launcher": "^1.2.1",
+    "lighthouse": "^12.8.2"
+  }
+}

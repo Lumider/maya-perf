@@ -1,0 +1,94 @@
+# Medición diaria de performance de Maya en producción + publicación del dashboard.
+#
+# medir:    corre Lighthouse (3 recorridos × 3 corridas), commitea el historial JSON a main
+#           y sube los reportes HTML como artifact (30 días) para diagnóstico profundo.
+# publicar: despliega public/ (dashboard + historial) a GitHub Pages en el mismo run —
+#           los pushes hechos con GITHUB_TOKEN no disparan otros workflows, así que el
+#           deploy debe vivir aquí, no en un workflow aparte disparado por push.
+name: Perf Lighthouse
+
+on:
+  schedule:
+    # 15:15 UTC ≈ media mañana en México/Perú/Bolivia/Guatemala: TTFB en horario representativo.
+    - cron: '15 15 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main] # cambios al dashboard también republican Pages (con skip_medicion)
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: perf
+  cancel-in-progress: false
+
+jobs:
+  medir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # En pushes a main solo se republica el dashboard; la medición es del cron/manual.
+    if: github.event_name != 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # ubuntu-latest trae Chrome estable preinstalado; chrome-launcher lo autodetecta.
+      - name: Medir con Lighthouse
+        run: npm run perf
+
+      - name: Subir reportes HTML de Lighthouse
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-lighthouse-${{ github.run_id }}
+          path: reportes/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Commitear historial actualizado
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/datos/perf-historial.json
+          if git diff --cached --quiet; then
+            echo "Sin cambios en el historial."
+          else
+            git commit -m "perf: corrida Lighthouse $(date -u +%F)"
+            git pull --rebase origin main
+            git push origin main
+          fi
+
+  publicar:
+    runs-on: ubuntu-latest
+    needs: medir
+    # needs.medir queda "skipped" en los push a main: publicar debe correr igual.
+    if: always() && (needs.medir.result == 'success' || needs.medir.result == 'skipped')
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main # incluye el commit del historial hecho por el job medir
+
+      - uses: actions/configure-pages@v5
+        with:
+          # Habilita Pages (source: GitHub Actions) en el primer run si aún no está activo.
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public/
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

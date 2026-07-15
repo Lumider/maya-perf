@@ -1,0 +1,7 @@
+node_modules/
+npm-debug.log
+
+# Reportes HTML de Lighthouse (npm run perf) — solo viajan como artifact del workflow
+/reportes/
+
+.DS_Store

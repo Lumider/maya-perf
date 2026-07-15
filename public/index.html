@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maya · Performance en producción</title>
+<style>
+  /* ==== Tokens (paleta de referencia dataviz, validada claro/oscuro) ==== */
+  :root {
+    color-scheme: light;
+    --plano: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --ink-mute: #898781;
+    --grid: #e1e0d9;
+    --eje: #c3c2b7;
+    --borde: rgba(11, 11, 11, 0.1);
+    /* series categóricas: portal / pedido / reportes (slots 1–3 validados) */
+    --s-portal: #2a78d6;
+    --s-pedido: #008300;
+    --s-reportes: #e87ba4;
+    /* estados (reservados, nunca como serie) */
+    --st-bueno: #0ca30c;
+    --st-alerta: #fab219;
+    --st-critico: #d03b3b;
+    --delta-bueno: #006300;
+    --acento: #dc582a; /* naranja Yanbal, solo cromo de UI (nunca serie) */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme='light'])) {
+      color-scheme: dark;
+      --plano: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --ink-mute: #898781;
+      --grid: #2c2c2a;
+      --eje: #383835;
+      --borde: rgba(255, 255, 255, 0.1);
+      --s-portal: #3987e5;
+      --s-pedido: #008300;
+      --s-reportes: #d55181;
+      --delta-bueno: #0ca30c;
+    }
+  }
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --plano: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-mute: #898781;
+    --grid: #2c2c2a;
+    --eje: #383835;
+    --borde: rgba(255, 255, 255, 0.1);
+    --s-portal: #3987e5;
+    --s-pedido: #008300;
+    --s-reportes: #d55181;
+    --delta-bueno: #0ca30c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plano);
+    color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  .marco { max-width: 1060px; margin: 0 auto; padding: 24px 20px 56px; }
+
+  header.cabecera { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 16px; margin-bottom: 20px; }
+  .cabecera h1 { font-size: 22px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  .cabecera .sub { color: var(--ink-2); font-size: 13.5px; margin: 0; }
+  .cabecera .meta-corrida { color: var(--ink-mute); font-size: 12.5px; margin-top: 6px; }
+  .empuje { margin-left: auto; }
+  button.tema {
+    border: 1px solid var(--borde); background: var(--surface); color: var(--ink-2);
+    border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 12.5px; cursor: pointer;
+  }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--borde); border-radius: 14px;
+    padding: 18px 20px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 2px; }
+  .card .desc { color: var(--ink-mute); font-size: 12.5px; margin: 0 0 12px; }
+
+  /* ==== Leyenda (siempre presente: 3 series) ==== */
+  .leyenda { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--ink-2); margin: 4px 0 10px; }
+  .leyenda .item { display: inline-flex; align-items: center; gap: 6px; }
+  .clave { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+
+  /* ==== Gráfica de tendencia ==== */
+  /* En pantallas angostas la gráfica scrollea dentro de su card en vez de encoger a lo ilegible. */
+  .lienzo { position: relative; overflow-x: auto; }
+  .lienzo svg { display: block; width: 100%; min-width: 720px; height: auto; }
+  .lienzo svg:focus-visible { outline: 2px solid var(--acento); outline-offset: 4px; border-radius: 6px; }
+  .tooltip {
+    position: absolute; pointer-events: none; display: none; min-width: 150px; z-index: 3;
+    background: var(--surface); border: 1px solid var(--borde); border-radius: 10px;
+    padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  }
+  .tooltip .cuando { color: var(--ink-mute); margin-bottom: 4px; }
+  .tooltip .fila { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+  .tooltip .fila b { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .tooltip .fila span { color: var(--ink-2); }
+
+  /* ==== Cards por recorrido ==== */
+  .recorridos { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .rec { background: var(--surface); border: 1px solid var(--borde); border-radius: 14px; padding: 16px 18px; }
+  .rec .encima { display: flex; align-items: center; gap: 8px; }
+  .rec h3 { font-size: 14.5px; margin: 0; display: inline-flex; align-items: center; gap: 8px; }
+  .rec .url { color: var(--ink-mute); font-size: 11.5px; word-break: break-all; margin: 1px 0 0; }
+  .puntito { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  .rec .principal { display: flex; align-items: center; gap: 14px; margin: 14px 0 6px; }
+  .anillo { position: relative; width: 76px; height: 76px; flex: none; }
+  .anillo svg { width: 76px; height: 76px; transform: rotate(-90deg); }
+  .anillo .num {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    font-size: 21px; font-weight: 650;
+  }
+  .banda { font-size: 11.5px; color: var(--ink-2); display: flex; align-items: center; gap: 5px; }
+  .deltas { font-size: 12.5px; color: var(--ink-2); display: grid; gap: 3px; }
+  .delta-num { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .sube { color: var(--delta-bueno); }
+  .baja { color: var(--st-critico); }
+  .spark { margin-top: 2px; }
+
+  /* auto-fit: en cards angostas cae a una sola columna en vez de desbordar (nowrap + 1fr no encoge). */
+  .metricas { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 14px; margin-top: 12px; font-size: 12.5px; }
+  .metricas .m { display: flex; align-items: baseline; gap: 6px; border-top: 1px solid var(--grid); padding-top: 6px; }
+  .metricas .m span { color: var(--ink-mute); }
+  .metricas .m b { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+
+  .aviso-error {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
+    font-size: 12px; color: var(--st-critico); font-weight: 600;
+  }
+  .nota-base { margin-top: 10px; font-size: 11.5px; color: var(--ink-mute); }
+
+  /* ==== Estado vacío ==== */
+  .vacio { text-align: center; padding: 34px 20px; }
+  .vacio .icono { font-size: 30px; }
+  .vacio p { color: var(--ink-2); max-width: 52ch; margin: 8px auto 0; }
+
+  /* ==== Tabla (vista accesible) ==== */
+  details.tabla { margin-top: 4px; }
+  details.tabla summary { cursor: pointer; color: var(--ink-2); font-size: 13px; padding: 6px 0; }
+  .envuelve-tabla { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; margin-top: 8px; }
+  th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-mute); font-weight: 600; }
+
+  footer.notas { color: var(--ink-mute); font-size: 12px; margin-top: 22px; }
+  footer.notas ul { margin: 6px 0 0; padding-left: 18px; }
+  footer.notas li { margin-top: 3px; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<div class="marco">
+  <header class="cabecera">
+    <div>
+      <h1>Maya · Performance en producción</h1>
+      <p class="sub">
+        Seguimiento continuo de la Auditoría de Performance Móvil (jun 2026) — Lighthouse móvil,
+        perfil estándar (CPU 4× + 4G lenta). Un dominio para México, Perú, Bolivia y Guatemala.
+      </p>
+      <p class="meta-corrida" id="meta-corrida">Cargando historial…</p>
+    </div>
+    <div class="empuje">
+      <button class="tema" id="btn-tema" type="button">Tema: auto</button>
+    </div>
+  </header>
+
+  <div id="contenido"></div>
+
+  <footer class="notas">
+    <strong>Notas metodológicas</strong>
+    <ul>
+      <li>Se mide <em>sin sesión</em>: cada recorrido captura su entrada real — cadena de redirecciones de login (Azure AD B2C) incluida, uno de los P0 de la auditoría. El interior post-login no se mide aquí.</li>
+      <li>En <em>Mis Reportes</em>, Lighthouse solo ve el spinner: el reporte SSRS real no cargó en &gt;90 s en la auditoría. La meta «reporte &lt; 5 s» requiere medición de campo.</li>
+      <li>TBT es la métrica más ruidosa en CI: leer tendencias, no puntos sueltos. Cada punto ya es la mediana de 3 corridas.</li>
+      <li>Perfil y recorridos se editan en <code>public/datos/objetivos.mjs</code>; los reportes HTML completos de cada corrida quedan como artifact del workflow.</li>
+    </ul>
+  </footer>
+</div>
+
+<div class="tooltip" id="tooltip" role="status"></div>
+
+<script type="module">
+  import { RECORRIDOS, METAS } from './datos/objetivos.mjs';
+
+  /* ==== Tema: auto → claro → oscuro (persistido con valores canónicos light/dark) ==== */
+  const btnTema = document.getElementById('btn-tema');
+  const ETIQUETA_TEMA = { auto: 'auto', light: 'claro', dark: 'oscuro' };
+  const aplicarTema = (t) => {
+    if (t === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = t;
+    btnTema.textContent = `Tema: ${ETIQUETA_TEMA[t]}`;
+  };
+  let tema = localStorage.getItem('maya-perf-tema');
+  if (!(tema in ETIQUETA_TEMA)) tema = 'auto';
+  aplicarTema(tema);
+  btnTema.addEventListener('click', () => {
+    tema = tema === 'auto' ? 'light' : tema === 'light' ? 'dark' : 'auto';
+    aplicarTema(tema);
+    localStorage.setItem('maya-perf-tema', tema);
+  });
+
+  const CONT = document.getElementById('contenido');
+  const META_CORRIDA = document.getElementById('meta-corrida');
+  const COLOR_SERIE = { portal: 'var(--s-portal)', pedido: 'var(--s-pedido)', reportes: 'var(--s-reportes)' };
+
+  const fmtFecha = (iso, largo = false) =>
+    new Date(iso).toLocaleDateString('es-PE', largo
+      ? { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }
+      : { day: 'numeric', month: 'short' });
+  const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`);
+  const fmtKb = (kb) => (kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`);
+
+  /* Umbrales oficiales de Lighthouse / Web Vitals → estado (color + etiqueta, nunca color solo). */
+  const ESTADOS = { bueno: ['var(--st-bueno)', 'bueno'], medio: ['var(--st-alerta)', 'a mejorar'], malo: ['var(--st-critico)', 'crítico'] };
+  const estadoScore = (v) => (v >= 90 ? 'bueno' : v >= 50 ? 'medio' : 'malo');
+  const UMBRALES = { lcpMs: [2500, 4000], fcpMs: [1800, 3000], tbtMs: [200, 600], cls: [0.1, 0.25], ttfbMs: [800, 1800], speedIndexMs: [3400, 5800] };
+  const estadoMetrica = (id, v) => {
+    const u = UMBRALES[id];
+    return !u ? null : v <= u[0] ? 'bueno' : v <= u[1] ? 'medio' : 'malo';
+  };
+
+  const el = (tag, clase, texto) => {
+    const n = document.createElement(tag);
+    if (clase) n.className = clase;
+    if (texto !== undefined) n.textContent = texto; // nombres/valores como texto plano, nunca innerHTML
+    return n;
+  };
+
+  /* ============================== Carga ============================== */
+  let historial;
+  try {
+    const res = await fetch('datos/perf-historial.json', { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    historial = await res.json();
+  } catch (e) {
+    const c = el('div', 'card vacio');
+    c.append(el('div', 'icono', '⚠️'), el('h2', null, 'No se pudo cargar el historial'), el('p', null, `Error leyendo datos/perf-historial.json (${e.message}).`));
+    CONT.append(c);
+    META_CORRIDA.textContent = '';
+    throw e;
+  }
+
+  const corridas = historial.corridas ?? [];
+  const ultima = corridas.at(-1);
+  META_CORRIDA.textContent = ultima
+    ? `Última corrida: ${fmtFecha(ultima.fecha, true)} · Lighthouse ${ultima.lighthouse} · ${corridas.length} corrida${corridas.length === 1 ? '' : 's'} en el historial`
+    : 'Aún no hay corridas en el historial.';
+
+  if (!ultima) {
+    const c = el('div', 'card vacio');
+    c.append(
+      el('div', 'icono', '⏱️'),
+      el('h2', null, 'Aún no hay mediciones'),
+      el('p', null, 'El workflow diario irá acumulando corridas aquí. Abajo queda la línea base de la auditoría de junio 2026 como punto de partida.'),
+    );
+    CONT.append(c);
+  }
+
+  /* ======================= Gráfica de tendencia ======================= */
+  /* La línea base de la auditoría (jun 2026, misma metodología) se antepone como
+     primer punto real de cada serie, para que la pregunta del dashboard —
+     «¿mejoramos desde la auditoría?» — se lea directamente en la línea. */
+  const puntosX = [{ etiqueta: 'Auditoría jun 2026', esBase: true }, ...corridas.map((c) => ({ etiqueta: fmtFecha(c.fecha), fecha: c.fecha }))];
+  const series = RECORRIDOS.map((r) => ({
+    ...r,
+    color: COLOR_SERIE[r.codigo],
+    valores: [r.base.score, ...corridas.map((c) => (c.recorridos[r.codigo]?.ok ? c.recorridos[r.codigo].score : null))],
+  }));
+
+  if (puntosX.length >= 1) {
+    const card = el('div', 'card');
+    card.append(el('h2', null, 'Puntaje de performance (móvil) por recorrido'), el('p', 'desc', `Mediana de 3 corridas por punto · meta de la auditoría: > ${METAS.score}`));
+
+    const leyenda = el('div', 'leyenda');
+    for (const s of series) {
+      const item = el('span', 'item');
+      const clave = el('span', 'clave');
+      clave.style.background = s.color;
+      item.append(clave, document.createTextNode(s.nombre));
+      leyenda.append(item);
+    }
+    card.append(leyenda);
+
+    // Margen derecho amplio: las etiquetas directas («39 · Ingresar a Maya») viven ahí y no deben recortarse.
+    const ANCHO = 980, ALTO = 320, M = { arr: 14, der: 175, aba: 34, izq: 40 };
+    const aw = ANCHO - M.izq - M.der, ah = ALTO - M.arr - M.aba;
+    const x = (i) => M.izq + (puntosX.length === 1 ? aw / 2 : (i * aw) / (puntosX.length - 1));
+    const y = (v) => M.arr + ah - (v / 100) * ah;
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${ANCHO} ${ALTO}`);
+    svg.setAttribute('tabindex', '0');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Tendencia del puntaje Lighthouse por recorrido; los valores están también en la tabla de abajo.');
+    const S = (n, attrs) => { const e2 = document.createElementNS(svgNS, n); for (const [k, v] of Object.entries(attrs)) e2.setAttribute(k, v); return e2; };
+
+    // Rejilla recesiva (0–100) + eje Y con ticks limpios
+    for (const v of [0, 25, 50, 75, 100]) {
+      svg.append(S('line', { x1: M.izq, x2: M.izq + aw, y1: y(v), y2: y(v), stroke: v === 0 ? 'var(--eje)' : 'var(--grid)', 'stroke-width': 1 }));
+      const t = S('text', { x: M.izq - 8, y: y(v) + 4, 'text-anchor': 'end', fill: 'var(--ink-mute)', 'font-size': 11 });
+      t.textContent = v;
+      svg.append(t);
+    }
+    // Línea de meta (referencia, en cromo — no color de serie ni de estado)
+    svg.append(S('line', { x1: M.izq, x2: M.izq + aw, y1: y(METAS.score), y2: y(METAS.score), stroke: 'var(--ink-mute)', 'stroke-width': 1.5 }));
+    // Etiqueta debajo de la línea de meta: las series rondan 37–57, la zona 45–50 queda más despejada.
+    const metaTxt = S('text', { x: M.izq + 4, y: y(METAS.score) + 13, fill: 'var(--ink-mute)', 'font-size': 11, 'font-weight': 600 });
+    metaTxt.textContent = `meta > ${METAS.score}`;
+    svg.append(metaTxt);
+
+    // Ticks X: primero (auditoría), último y ~5 intermedios
+    const cadaX = Math.max(1, Math.ceil((puntosX.length - 1) / 6));
+    puntosX.forEach((p, i) => {
+      if (i !== 0 && i !== puntosX.length - 1 && i % cadaX !== 0) return;
+      const t = S('text', { x: x(i), y: ALTO - 12, 'text-anchor': i === 0 ? 'start' : 'middle', fill: p.esBase ? 'var(--ink-2)' : 'var(--ink-mute)', 'font-size': 11, 'font-weight': p.esBase ? 600 : 400 });
+      t.textContent = p.etiqueta;
+      svg.append(t);
+    });
+
+    // Series: línea 2px + marcador de auditoría (anillo hueco) + punto final + etiqueta directa
+    const finales = [];
+    for (const s of series) {
+      const coords = s.valores.map((v, i) => (v == null ? null : [x(i), y(v)]));
+      const d = coords.map((c, i) => (c == null ? null : `${i === 0 || coords[i - 1] == null ? 'M' : 'L'}${c[0]},${c[1]}`)).filter(Boolean).join(' ');
+      const linea = S('path', { d, fill: 'none', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+      linea.style.stroke = s.color;
+      svg.append(linea);
+      // marcador de la línea base: anillo hueco (lo distingue de las corridas)
+      if (coords[0]) {
+        const m = S('circle', { cx: coords[0][0], cy: coords[0][1], r: 4.5, fill: 'var(--surface)', 'stroke-width': 2 });
+        m.style.stroke = s.color;
+        svg.append(m);
+      }
+      const ultimoIdx = coords.length - 1 - [...coords].reverse().findIndex((c) => c != null);
+      if (coords[ultimoIdx]) {
+        const [ux, uy] = coords[ultimoIdx];
+        const punto = S('circle', { cx: ux, cy: uy, r: 4, stroke: 'var(--surface)', 'stroke-width': 2 });
+        punto.style.fill = s.color;
+        svg.append(punto);
+        finales.push({ s, ux, uy, v: s.valores[ultimoIdx] });
+      }
+    }
+    // Etiquetas directas al final de línea, separadas si chocan (texto en tinta, clave de color al lado)
+    finales.sort((a, b) => a.uy - b.uy);
+    for (let i = 1; i < finales.length; i++) if (finales[i].uy - finales[i - 1].uy < 16) finales[i].uy = finales[i - 1].uy + 16;
+    for (const f of finales) {
+      const g = S('g', {});
+      const clave = S('line', { x1: f.ux + 8, x2: f.ux + 20, y1: f.uy, y2: f.uy, 'stroke-width': 2 });
+      clave.style.stroke = f.s.color;
+      const t = S('text', { x: f.ux + 24, y: f.uy + 4, fill: 'var(--ink)', 'font-size': 12, 'font-weight': 600 });
+      t.textContent = `${f.v} · ${f.s.nombre}`;
+      g.append(clave, t);
+      svg.append(g);
+    }
+
+    // Crosshair + tooltip (una lectura por X con TODAS las series); mismo detalle con teclado
+    const cruz = S('line', { y1: M.arr, y2: M.arr + ah, stroke: 'var(--eje)', 'stroke-width': 1, visibility: 'hidden' });
+    svg.append(cruz);
+    const captura = S('rect', { x: M.izq, y: M.arr, width: aw, height: ah, fill: 'transparent' });
+    svg.append(captura);
+
+    const lienzo = el('div', 'lienzo');
+    lienzo.append(svg);
+    card.append(lienzo);
+    const tooltip = document.getElementById('tooltip');
+
+    const mostrar = (idx) => {
+      const px = x(idx);
+      cruz.setAttribute('x1', px); cruz.setAttribute('x2', px);
+      cruz.setAttribute('visibility', 'visible');
+      tooltip.replaceChildren();
+      tooltip.append(el('div', 'cuando', puntosX[idx].esBase ? 'Auditoría · jun 2026 (línea base)' : fmtFecha(corridas[idx - 1].fecha, true)));
+      for (const s of series) {
+        const v = s.valores[idx];
+        const fila = el('div', 'fila');
+        const clave = el('i', 'clave');
+        clave.style.background = s.color;
+        fila.append(clave, el('span', null, s.nombre), el('b', null, v == null ? 'no midió' : String(v)));
+        tooltip.append(fila);
+      }
+      const rect = svg.getBoundingClientRect();
+      const fx = rect.left + window.scrollX + (px / ANCHO) * rect.width;
+      const fy = rect.top + window.scrollY + (M.arr / ALTO) * rect.height;
+      tooltip.style.display = 'block';
+      const anchoT = tooltip.offsetWidth;
+      tooltip.style.left = `${Math.min(fx + 12, rect.right + window.scrollX - anchoT - 4)}px`;
+      tooltip.style.top = `${fy}px`;
+    };
+    const ocultar = () => { cruz.setAttribute('visibility', 'hidden'); tooltip.style.display = 'none'; };
+
+    captura.addEventListener('pointermove', (ev) => {
+      const rect = svg.getBoundingClientRect();
+      const relX = ((ev.clientX - rect.left) / rect.width) * ANCHO;
+      const idx = Math.round(((relX - M.izq) / aw) * (puntosX.length - 1));
+      mostrar(Math.max(0, Math.min(puntosX.length - 1, idx)));
+    });
+    captura.addEventListener('pointerleave', ocultar);
+    let idxTeclado = puntosX.length - 1;
+    svg.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight' && ev.key !== 'Escape') return;
+      ev.preventDefault();
+      if (ev.key === 'Escape') return ocultar();
+      idxTeclado = Math.max(0, Math.min(puntosX.length - 1, idxTeclado + (ev.key === 'ArrowRight' ? 1 : -1)));
+      mostrar(idxTeclado);
+    });
+    svg.addEventListener('blur', ocultar);
+
+    CONT.append(card);
+  }
+
+  /* ========================= Cards por recorrido ========================= */
+  const gridRec = el('div', 'recorridos');
+  const anterior = corridas.at(-2);
+
+  const deltaTexto = (actual, previo, invertir = false) => {
+    if (previo == null || actual == null) return null;
+    const d = actual - previo;
+    if (d === 0) return { txt: '±0', clase: '' };
+    const bueno = invertir ? d < 0 : d > 0;
+    return { txt: `${d > 0 ? '+' : '−'}${Math.abs(d)}`, clase: bueno ? 'sube' : 'baja' };
+  };
+
+  for (const r of RECORRIDOS) {
+    const card = el('article', 'rec');
+    const encima = el('div', 'encima');
+    const h = el('h3');
+    const puntito = el('span', 'puntito');
+    puntito.style.background = COLOR_SERIE[r.codigo];
+    h.append(puntito, document.createTextNode(r.nombre));
+    encima.append(h);
+    card.append(encima);
+    const url = el('p', 'url', r.url.replace('https://', ''));
+    card.append(url);
+
+    const medicion = ultima?.recorridos[r.codigo];
+    const score = medicion?.ok ? medicion.score : null;
+    const mostrado = score ?? r.base.score; // sin corridas aún: se muestra la línea base
+
+    // Anillo de score (estado = color + etiqueta de banda, nunca color solo)
+    const principal = el('div', 'principal');
+    const [colorEstado, etiquetaEstado] = ESTADOS[estadoScore(mostrado)];
+    const anillo = el('div', 'anillo');
+    const r0 = 32, c0 = 2 * Math.PI * r0;
+    anillo.innerHTML =
+      `<svg viewBox="0 0 76 76" aria-hidden="true">` +
+      `<circle cx="38" cy="38" r="${r0}" fill="none" stroke="var(--grid)" stroke-width="6"/>` +
+      `<circle cx="38" cy="38" r="${r0}" fill="none" stroke="${colorEstado}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${(c0 * mostrado) / 100} ${c0}"/>` +
+      `</svg>`;
+    anillo.append(el('div', 'num', String(mostrado)));
+    principal.append(anillo);
+
+    const lado = el('div');
+    const banda = el('div', 'banda');
+    const puntoEstado = el('span', 'puntito');
+    puntoEstado.style.background = colorEstado;
+    banda.append(puntoEstado, document.createTextNode(`${etiquetaEstado} · score /100`));
+    lado.append(banda);
+
+    const deltas = el('div', 'deltas');
+    if (score != null) {
+      const dBase = deltaTexto(score, r.base.score);
+      if (dBase) {
+        const fila = el('div');
+        const num = el('span', `delta-num ${dBase.clase}`, dBase.txt);
+        fila.append(num, document.createTextNode(' vs auditoría jun 2026'));
+        deltas.append(fila);
+      }
+      const scoreAnterior = anterior?.recorridos[r.codigo]?.ok ? anterior.recorridos[r.codigo].score : null;
+      const dPrev = deltaTexto(score, scoreAnterior);
+      if (dPrev) {
+        const fila = el('div');
+        const num = el('span', `delta-num ${dPrev.clase}`, dPrev.txt);
+        fila.append(num, document.createTextNode(' vs corrida anterior'));
+        deltas.append(fila);
+      }
+    }
+    lado.append(deltas);
+
+    // Sparkline del score (últimos 12 puntos): serie en gris de apoyo, punto actual en el color de la serie
+    const valores = corridas.map((c) => (c.recorridos[r.codigo]?.ok ? c.recorridos[r.codigo].score : null)).filter((v) => v != null).slice(-12);
+    if (valores.length >= 2) {
+      const w = 120, hSp = 30;
+      const min = Math.min(...valores), max = Math.max(...valores);
+      const sy = (v) => (max === min ? hSp / 2 : hSp - 3 - ((v - min) / (max - min)) * (hSp - 6));
+      const sx = (i) => 2 + (i * (w - 10)) / (valores.length - 1);
+      const d = valores.map((v, i) => `${i === 0 ? 'M' : 'L'}${sx(i)},${sy(v)}`).join(' ');
+      const fin = valores.length - 1;
+      const spark = el('div', 'spark');
+      spark.innerHTML =
+        `<svg width="${w}" height="${hSp}" viewBox="0 0 ${w} ${hSp}" aria-hidden="true">` +
+        `<path d="${d}" fill="none" stroke="var(--ink-mute)" stroke-width="1.5" stroke-linejoin="round"/>` +
+        `<circle cx="${sx(fin)}" cy="${sy(valores[fin])}" r="3.5" fill="${COLOR_SERIE[r.codigo]}" stroke="var(--surface)" stroke-width="2"/>` +
+        `</svg>`;
+      lado.append(spark);
+    }
+    principal.append(lado);
+    card.append(principal);
+
+    if (medicion && medicion.ok === false) {
+      const aviso = el('div', 'aviso-error');
+      aviso.append(document.createTextNode('⚠︎'), el('span', null, `No se pudo medir en la última corrida (${medicion.error})`));
+      card.append(aviso);
+    }
+
+    // Métricas de la última medición válida (o nada si nunca midió)
+    const fuente = medicion?.ok ? medicion : [...corridas].reverse().map((c) => c.recorridos[r.codigo]).find((m) => m?.ok);
+    if (fuente) {
+      const grid = el('div', 'metricas');
+      const filas = [
+        ['LCP', 'lcpMs', fmtMs],
+        ['FCP', 'fcpMs', fmtMs],
+        ['TBT', 'tbtMs', fmtMs],
+        ['CLS', 'cls', (v) => v.toFixed(3)],
+        ['TTFB', 'ttfbMs', fmtMs],
+        ['Peso', 'pesoKb', fmtKb],
+        ['JS sin usar', 'jsSinUsarKb', fmtKb],
+        ['Redirecciones', 'redireccionesMs', fmtMs],
+      ];
+      for (const [nombre, id, fmt] of filas) {
+        const m = el('div', 'm');
+        m.append(el('span', null, nombre));
+        const b = el('b', null, fmt(fuente[id]));
+        const est = estadoMetrica(id, fuente[id]);
+        if (est) {
+          const p = el('i', 'puntito');
+          p.style.background = ESTADOS[est][0];
+          p.title = ESTADOS[est][1];
+          b.prepend(p);
+        }
+        m.append(b);
+        grid.append(m);
+      }
+      card.append(grid);
+    }
+
+    if (score == null) card.append(el('p', 'nota-base', fuente ? 'Mostrando la última medición válida.' : 'Valores de la línea base de la auditoría (jun 2026); aún sin corridas propias.'));
+    gridRec.append(card);
+  }
+  CONT.append(gridRec);
+
+  /* ===================== Tabla (acceso sin hover) ===================== */
+  if (corridas.length > 0) {
+    const cardTabla = el('div', 'card');
+    const det = el('details', 'tabla');
+    det.append(el('summary', null, `Ver tabla de corridas (${corridas.length})`));
+    const envuelve = el('div', 'envuelve-tabla');
+    const tabla = el('table');
+    const thead = el('thead');
+    const trh = el('tr');
+    trh.append(el('th', null, 'Fecha'));
+    for (const r of RECORRIDOS) for (const m of ['score', 'LCP', 'TTFB']) trh.append(el('th', null, `${r.nombre} · ${m}`));
+    thead.append(trh);
+    tabla.append(thead);
+    const tbody = el('tbody');
+    for (const c of [...corridas].reverse()) {
+      const tr = el('tr');
+      tr.append(el('td', null, fmtFecha(c.fecha, true)));
+      for (const r of RECORRIDOS) {
+        const m = c.recorridos[r.codigo];
+        if (m?.ok) {
+          tr.append(el('td', null, String(m.score)), el('td', null, fmtMs(m.lcpMs)), el('td', null, fmtMs(m.ttfbMs)));
+        } else {
+          tr.append(el('td', null, m?.error ?? '—'), el('td', null, '—'), el('td', null, '—'));
+        }
+      }
+      tbody.append(tr);
+    }
+    tabla.append(tbody);
+    envuelve.append(tabla);
+    det.append(envuelve);
+    cardTabla.append(det);
+    CONT.append(cardTabla);
+  }
+</script>
+</body>
+</html>
