@@ -1,4 +1,41 @@
 {
   "version": 1,
-  "corridas": []
+  "corridas": [
+    {
+      "fecha": "2026-07-15T17:41:03.618Z",
+      "lighthouse": "12.8.2",
+      "recorridos": {
+        "portal": {
+          "ok": true,
+          "score": 50,
+          "fcpMs": 5942,
+          "lcpMs": 11049,
+          "tbtMs": 431,
+          "cls": 0,
+          "speedIndexMs": 5942,
+          "ttfbMs": 52,
+          "pesoKb": 1511,
+          "jsSinUsarKb": 470,
+          "redireccionesMs": 0
+        },
+        "pedido": {
+          "ok": false,
+          "error": "NO_FCP"
+        },
+        "reportes": {
+          "ok": true,
+          "score": 56,
+          "fcpMs": 9777,
+          "lcpMs": 11515,
+          "tbtMs": 10,
+          "cls": 0,
+          "speedIndexMs": 9777,
+          "ttfbMs": 216,
+          "pesoKb": 2217,
+          "jsSinUsarKb": 482,
+          "redireccionesMs": 0
+        }
+      }
+    }
+  ]
 }
