@@ -36,6 +36,42 @@
           "redireccionesMs": 0
         }
       }
+    },
+    {
+      "fecha": "2026-07-16T16:46:03.127Z",
+      "lighthouse": "12.8.2",
+      "recorridos": {
+        "portal": {
+          "ok": true,
+          "score": 46,
+          "fcpMs": 5889,
+          "lcpMs": 11215,
+          "tbtMs": 548,
+          "cls": 0,
+          "speedIndexMs": 5889,
+          "ttfbMs": 83,
+          "pesoKb": 1528,
+          "jsSinUsarKb": 474,
+          "redireccionesMs": 0
+        },
+        "pedido": {
+          "ok": false,
+          "error": "NO_FCP"
+        },
+        "reportes": {
+          "ok": true,
+          "score": 56,
+          "fcpMs": 9702,
+          "lcpMs": 12128,
+          "tbtMs": 29,
+          "cls": 0,
+          "speedIndexMs": 9702,
+          "ttfbMs": 307,
+          "pesoKb": 2220,
+          "jsSinUsarKb": 482,
+          "redireccionesMs": 7559
+        }
+      }
     }
   ]
 }
