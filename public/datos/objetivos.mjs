@@ -47,15 +47,16 @@ export const RECORRIDOS_SESION = [
     // Portal: 37/100, LCP 17.9 s, TBT 720 ms, 2.1 MB de JS sin usar.
     base: { score: 37, lcpMs: 17900 },
   },
-  // Decisión (jul-2026): por ahora SOLO se mide #/inicio. Para reactivar las derivaciones
-  // por clic (Pase de Pedido en pedidos.yanbal.com y Mis Reportes), descomentar:
-  // {
-  //   codigo: 'pedido-real',
-  //   nombre: 'Realizar pedido (desde el portal)',
-  //   corto: 'Pedido',
-  //   selectorClic: ['a[href*="pedidos.yanbal"]', '::-p-text(Realizar pedido)'],
-  //   base: { score: 50, lcpMs: 15800 },
-  // },
+  {
+    codigo: 'pedido-real',
+    nombre: 'Realizar pedido (desde el portal)',
+    corto: 'Pedido',
+    // El enlace del portal es <a id="PEDI">Realizar Pedido</a> (visto en el inventario
+    // de diagnóstico); deriva a pedidos.yanbal.com con el handoff de tokens incluido.
+    selectorClic: ['a#PEDI', 'a[href*="pedidos.yanbal"]', '::-p-text(Realizar Pedido)'],
+    // Pedido: 50/100, LCP 15.8 s, ~17 s recuperables en redirecciones de login.
+    base: { score: 50, lcpMs: 15800 },
+  },
   // {
   //   codigo: 'reportes-real',
   //   nombre: 'Mis Reportes (desde el portal)',
