@@ -81,6 +81,10 @@ async function volcarInventario(page, numero) {
         titulo: document.title,
         inputs: [...document.querySelectorAll('input')].map(desc),
         botones: [...document.querySelectorAll('button, [role="button"], input[type="submit"]')].map(desc),
+        enlaces: [...document.querySelectorAll('a')].slice(0, 20).map(desc),
+        clicables: [...document.querySelectorAll('img[alt], [class*="pais" i], [class*="country" i], [class*="card" i]')]
+          .slice(0, 20)
+          .map(desc),
         iframes: [...document.querySelectorAll('iframe')].map((f) => f.src?.split('?')[0] ?? ''),
       };
     });
@@ -108,18 +112,36 @@ async function buscarSelector(page, candidatos, timeoutMs = 30000) {
   }
 }
 
-/** Inicia sesión (sin medir). Da el login por bueno cuando la URL vuelve al portal. */
+/** Inicia sesión (sin medir): selector de país → formulario → espera del portal. */
 async function iniciarSesion(page) {
   await page.goto(SESION.urlLogin, { waitUntil: 'networkidle2', timeout: 90000 });
-  const selUsuario = await buscarSelector(page, SESION.selectores.usuario);
+
+  // Paso 1 — selector de países (#/selector-paises): clic en el mercado de la cuenta.
+  // Si la app no lo muestra (p. ej. lo recuerda), se sigue directo al formulario.
+  if (SESION.pais?.length) {
+    try {
+      const selPais = await buscarSelector(page, SESION.pais, 20000);
+      await page.click(selPais);
+      process.stderr.write(`  país seleccionado con ${selPais}\n`);
+    } catch {
+      process.stderr.write('  (sin selector de país visible; se continúa al login)\n');
+    }
+  }
+
+  // Paso 2 — formulario de usuario/clave (SPA de Maya o página alojada de B2C).
+  const selUsuario = await buscarSelector(page, SESION.selectores.usuario, 45000);
   await page.type(selUsuario, usuario, { delay: 20 });
   const selClave = await buscarSelector(page, SESION.selectores.clave);
   await page.type(selClave, clave, { delay: 20 });
   const selEnviar = await buscarSelector(page, SESION.selectores.enviar);
   await page.click(selEnviar);
+
+  // Paso 3 — sesión iniciada: de vuelta en el dominio del portal y fuera de las
+  // pantallas de login/selección (si la clave fuera rechazada, esto expira y el
+  // fallo queda registrado en vez de medir una pantalla equivocada).
   const dominioPortal = new URL(SESION.urlPortal).host;
   await page.waitForFunction(
-    (host) => location.host === host,
+    (host) => location.host === host && !/login|selector-paises|clave|password/i.test(location.hash),
     { timeout: SESION.esperaPostLoginMs, polling: 1000 },
     dominioPortal,
   );

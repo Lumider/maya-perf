@@ -71,6 +71,9 @@ export const RECORRIDOS_SESION = [
 export const SESION = {
   urlLogin: 'https://maya.yanbal.com',
   urlPortal: 'https://maya.yanbal.com/#/inicio',
+  /** Maya primero muestra el selector de países (#/selector-paises). Se hace clic en el
+   *  mercado de la cuenta de prueba antes de buscar el formulario de login. */
+  pais: ['::-p-text(Perú)', '::-p-text(Peru)', 'img[alt*="Per" i]', '[class*="peru" i]'],
   selectores: {
     usuario: ['#signInName', '#email', 'input[type="email"]', 'input[name="Username"]'],
     clave: ['#password', 'input[type="password"]'],
