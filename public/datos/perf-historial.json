@@ -1,4 +1,24 @@
 {
   "version": 1,
-  "corridas": []
+  "corridas": [
+    {
+      "fecha": "2026-07-17T05:50:16.860Z",
+      "lighthouse": "12.8.2",
+      "recorridos": {
+        "inicio": {
+          "ok": true,
+          "score": 37,
+          "fcpMs": 5188,
+          "lcpMs": 11709,
+          "tbtMs": 1225,
+          "cls": 0,
+          "speedIndexMs": 5629,
+          "ttfbMs": 83,
+          "pesoKb": 1542,
+          "jsSinUsarKb": 490,
+          "redireccionesMs": 0
+        }
+      }
+    }
+  ]
 }
