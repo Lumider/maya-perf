@@ -61,8 +61,40 @@ const CONFIG_LH = {
   settings: { onlyCategories: ['performance'], formFactor: 'mobile' },
 };
 
+/** Vuelca a stderr (→ log del workflow) y a reportes/ un inventario de la página:
+ *  inputs, botones e iframes presentes. Es el diagnóstico clave cuando el login falla
+ *  con SELECTOR_NO_ENCONTRADO: dice qué selectores usar en SESION.selectores. */
+async function volcarInventario(page, numero) {
+  try {
+    const inv = await page.evaluate(() => {
+      const desc = (el) => ({
+        tag: el.tagName.toLowerCase(),
+        id: el.id || undefined,
+        name: el.getAttribute('name') || undefined,
+        type: el.getAttribute('type') || undefined,
+        placeholder: el.getAttribute('placeholder') || undefined,
+        texto: (el.textContent || '').trim().slice(0, 50) || undefined,
+      });
+      return {
+        // Solo origen+ruta: la query de B2C lleva state/nonce que no pintan en un log.
+        url: location.origin + location.pathname + location.hash,
+        titulo: document.title,
+        inputs: [...document.querySelectorAll('input')].map(desc),
+        botones: [...document.querySelectorAll('button, [role="button"], input[type="submit"]')].map(desc),
+        iframes: [...document.querySelectorAll('iframe')].map((f) => f.src?.split('?')[0] ?? ''),
+      };
+    });
+    const json = JSON.stringify(inv, null, 2);
+    process.stderr.write(`  inventario de la página (flujo ${numero}):\n${json}\n`);
+    mkdirSync(REPORTES, { recursive: true });
+    writeFileSync(`${REPORTES}/login-dom-${numero}.json`, json);
+  } catch (e) {
+    process.stderr.write(`  (no se pudo volcar el inventario: ${e?.message})\n`);
+  }
+}
+
 /** Prueba una lista de selectores candidatos y devuelve el primero presente. */
-async function buscarSelector(page, candidatos, timeoutMs = 15000) {
+async function buscarSelector(page, candidatos, timeoutMs = 30000) {
   const inicio = Date.now();
   for (;;) {
     for (const sel of candidatos) {
@@ -134,7 +166,8 @@ async function correrFlujo(browser, numero) {
   } catch (e) {
     const error = `LOGIN_FALLO: ${e?.message?.slice(0, 120)}`;
     for (const rec of RECORRIDOS_SESION) resultados[rec.codigo] ??= { error };
-    // Screenshot de dónde quedó el login, para depurar selectores B2C.
+    // Diagnóstico: inventario de la página (al log del workflow) + screenshot (al artifact).
+    await volcarInventario(page, numero);
     mkdirSync(REPORTES, { recursive: true });
     await page
       .screenshot({ path: `${REPORTES}/login-fallo-${numero}.png`, fullPage: true })
