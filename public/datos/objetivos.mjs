@@ -74,10 +74,15 @@ export const SESION = {
   /** Maya primero muestra el selector de países (#/selector-paises). Se hace clic en el
    *  mercado de la cuenta de prueba antes de buscar el formulario de login. */
   pais: ['::-p-text(Perú)', '::-p-text(Peru)', 'img[alt*="Per" i]', '[class*="peru" i]'],
+  /** Página real: yanbalcustomers.b2clogin.com ("Yanbal IAM | Sign In").
+   *  #signInName espera el CÓDIGO de consultora (placeholder "Code"); el botón visible
+   *  es #submit ("Sign In") — #continue existe pero está oculto. La página incluye
+   *  reCAPTCHA: si la política lo exige, el login automatizado no puede completarse
+   *  (ver README para las alternativas legítimas). */
   selectores: {
-    usuario: ['#signInName', '#email', 'input[type="email"]', 'input[name="Username"]'],
+    usuario: ['#signInName', '#email', 'input[type="email"]'],
     clave: ['#password', 'input[type="password"]'],
-    enviar: ['#next', 'button[type="submit"]', 'input[type="submit"]'],
+    enviar: ['#submit', '#next', 'button[type="submit"]', 'input[type="submit"]'],
   },
   /** El login se da por bueno cuando la URL vuelve al dominio del portal. */
   esperaPostLoginMs: 60000,

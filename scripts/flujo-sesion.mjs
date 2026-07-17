@@ -97,13 +97,16 @@ async function volcarInventario(page, numero) {
   }
 }
 
-/** Prueba una lista de selectores candidatos y devuelve el primero presente. */
-async function buscarSelector(page, candidatos, timeoutMs = 30000) {
+/** Prueba una lista de selectores candidatos y devuelve el primer elemento VISIBLE
+ *  (las páginas de B2C tienen botones duplicados ocultos, p. ej. #continue). */
+async function buscarElemento(page, candidatos, timeoutMs = 30000) {
   const inicio = Date.now();
   for (;;) {
     for (const sel of candidatos) {
-      const el = await page.$(sel).catch(() => null);
-      if (el) return sel;
+      const els = await page.$$(sel).catch(() => []);
+      for (const el of els) {
+        if (await el.boundingBox().catch(() => null)) return { el, sel };
+      }
     }
     if (Date.now() - inicio > timeoutMs) {
       throw new Error(`SELECTOR_NO_ENCONTRADO: ${candidatos.join(' | ')}`);
@@ -120,21 +123,22 @@ async function iniciarSesion(page) {
   // Si la app no lo muestra (p. ej. lo recuerda), se sigue directo al formulario.
   if (SESION.pais?.length) {
     try {
-      const selPais = await buscarSelector(page, SESION.pais, 20000);
-      await page.click(selPais);
-      process.stderr.write(`  país seleccionado con ${selPais}\n`);
+      const pais = await buscarElemento(page, SESION.pais, 20000);
+      await pais.el.click();
+      process.stderr.write(`  país seleccionado con ${pais.sel}\n`);
     } catch {
       process.stderr.write('  (sin selector de país visible; se continúa al login)\n');
     }
   }
 
-  // Paso 2 — formulario de usuario/clave (SPA de Maya o página alojada de B2C).
-  const selUsuario = await buscarSelector(page, SESION.selectores.usuario, 45000);
-  await page.type(selUsuario, usuario, { delay: 20 });
-  const selClave = await buscarSelector(page, SESION.selectores.clave);
-  await page.type(selClave, clave, { delay: 20 });
-  const selEnviar = await buscarSelector(page, SESION.selectores.enviar);
-  await page.click(selEnviar);
+  // Paso 2 — formulario de usuario/clave (página alojada de B2C, "Yanbal IAM").
+  const campoUsuario = await buscarElemento(page, SESION.selectores.usuario, 45000);
+  await campoUsuario.el.type(usuario, { delay: 20 });
+  const campoClave = await buscarElemento(page, SESION.selectores.clave);
+  await campoClave.el.type(clave, { delay: 20 });
+  const botonEnviar = await buscarElemento(page, SESION.selectores.enviar);
+  await botonEnviar.el.click();
+  process.stderr.write(`  formulario enviado (${botonEnviar.sel})\n`);
 
   // Paso 3 — sesión iniciada: de vuelta en el dominio del portal y fuera de las
   // pantallas de login/selección (si la clave fuera rechazada, esto expira y el
@@ -165,8 +169,8 @@ async function correrFlujo(browser, numero) {
           await flow.navigate(rec.url, { name: rec.nombre });
         } else {
           // Navegación derivada de un clic (pedido, reportes) — el recorrido real.
-          const sel = await buscarSelector(page, rec.selectorClic);
-          await flow.navigate(async () => page.click(sel), { name: rec.nombre });
+          const enlace = await buscarElemento(page, rec.selectorClic);
+          await flow.navigate(async () => enlace.el.click(), { name: rec.nombre });
           // Volver al portal para el siguiente clic (fuera de medición).
           await page.goto(SESION.urlPortal, { waitUntil: 'networkidle2', timeout: 90000 });
         }
