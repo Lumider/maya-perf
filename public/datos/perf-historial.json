@@ -19,6 +19,29 @@
           "redireccionesMs": 0
         }
       }
+    },
+    {
+      "fecha": "2026-07-17T15:13:49.428Z",
+      "lighthouse": "12.8.2",
+      "recorridos": {
+        "inicio": {
+          "ok": true,
+          "score": 39,
+          "fcpMs": 5309,
+          "lcpMs": 11881,
+          "tbtMs": 1035,
+          "cls": 0,
+          "speedIndexMs": 5309,
+          "ttfbMs": 106,
+          "pesoKb": 1539,
+          "jsSinUsarKb": 489,
+          "redireccionesMs": 0
+        },
+        "pedido-real": {
+          "ok": false,
+          "error": "SELECTOR_NO_ENCONTRADO: a#PEDI | a[href*=\"pedidos.yanbal\"] | ::-p-text(Realizar Pedido)"
+        }
+      }
     }
   ]
 }
