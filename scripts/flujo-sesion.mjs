@@ -66,6 +66,17 @@ const CONFIG_LH = {
  *  con SELECTOR_NO_ENCONTRADO: dice qué selectores usar en SESION.selectores. */
 async function volcarInventario(page, numero) {
   try {
+    // Nunca volcar el inventario del portal ya autenticado: contiene datos personales
+    // (nombre, indicadores) y los logs del workflow son públicos. Solo pantallas previas
+    // al login (selector de países, B2C).
+    const url = await page.url();
+    const dentroDelPortal =
+      new URL(url).host === new URL(SESION.urlPortal).host &&
+      !/login|selector-paises/i.test(url);
+    if (dentroDelPortal) {
+      process.stderr.write('  (inventario omitido: la página es el portal autenticado)\n');
+      return;
+    }
     const inv = await page.evaluate(() => {
       const desc = (el) => ({
         tag: el.tagName.toLowerCase(),
@@ -166,6 +177,9 @@ async function correrFlujo(browser, numero) {
         process.stderr.write(`  flujo ${numero}: midiendo ${rec.codigo}…\n`);
         if (rec.url) {
           // Navegación directa (el portal): recarga fría PERO con la sesión ya iniciada.
+          // Ir a about:blank primero: tras el login la página YA está en #/inicio y
+          // navegar a la misma URL solo cambia el hash → sin navegación → NO_NAVSTART.
+          await page.goto('about:blank');
           await flow.navigate(rec.url, { name: rec.nombre });
         } else {
           // Navegación derivada de un clic (pedido, reportes) — el recorrido real.
