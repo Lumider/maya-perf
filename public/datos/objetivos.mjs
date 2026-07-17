@@ -47,23 +47,22 @@ export const RECORRIDOS_SESION = [
     // Portal: 37/100, LCP 17.9 s, TBT 720 ms, 2.1 MB de JS sin usar.
     base: { score: 37, lcpMs: 17900 },
   },
-  {
-    codigo: 'pedido-real',
-    nombre: 'Realizar pedido (desde el portal)',
-    corto: 'Pedido',
-    selectorClic: ['a[href*="pedidos.yanbal"]', '::-p-text(Realizar pedido)'],
-    // Pedido: 50/100, LCP 15.8 s, ~17 s recuperables en redirecciones de login.
-    base: { score: 50, lcpMs: 15800 },
-  },
-  {
-    codigo: 'reportes-real',
-    nombre: 'Mis Reportes (desde el portal)',
-    corto: 'Reportes',
-    selectorClic: ['a[href*="misreportes.yanbal"]', '::-p-text(Mis Reportes)', '::-p-text(Reportes)'],
-    // Reportes: 52/100 pero Lighthouse solo midió el spinner — el reporte SSRS real
-    // no cargó en >90 s. Sin LCP de referencia honesto.
-    base: { score: 52, lcpMs: null },
-  },
+  // Decisión (jul-2026): por ahora SOLO se mide #/inicio. Para reactivar las derivaciones
+  // por clic (Pase de Pedido en pedidos.yanbal.com y Mis Reportes), descomentar:
+  // {
+  //   codigo: 'pedido-real',
+  //   nombre: 'Realizar pedido (desde el portal)',
+  //   corto: 'Pedido',
+  //   selectorClic: ['a[href*="pedidos.yanbal"]', '::-p-text(Realizar pedido)'],
+  //   base: { score: 50, lcpMs: 15800 },
+  // },
+  // {
+  //   codigo: 'reportes-real',
+  //   nombre: 'Mis Reportes (desde el portal)',
+  //   corto: 'Reportes',
+  //   selectorClic: ['a[href*="misreportes.yanbal"]', '::-p-text(Mis Reportes)'],
+  //   base: { score: 52, lcpMs: null },
+  // },
 ];
 
 /** Parámetros del login B2C para el flujo con sesión. Los selectores son los típicos de
@@ -81,24 +80,8 @@ export const SESION = {
   esperaPostLoginMs: 60000,
 };
 
-/** Entrada anónima a cada plataforma (sin sesión → rebote al login). Sin línea base. */
-export const RECORRIDOS = [
-  {
-    codigo: 'portal',
-    nombre: 'Entrada a Maya (login)',
-    corto: 'Maya',
-    url: 'https://maya.yanbal.com',
-  },
-  {
-    codigo: 'pedido',
-    nombre: 'Entrada a Pase de Pedido',
-    corto: 'Pedido',
-    url: 'https://pedidos.yanbal.com',
-  },
-  {
-    codigo: 'reportes',
-    nombre: 'Entrada a Mis Reportes',
-    corto: 'Reportes',
-    url: 'https://misreportes.yanbal.com',
-  },
-];
+/** Entrada anónima (sin sesión) — DESACTIVADA por decisión de jul-2026: el seguimiento
+ *  se concentra en el recorrido real. Para reactivarla, añadir aquí los recorridos
+ *  (p. ej. { codigo: 'portal', nombre: 'Entrada a Maya (login)', corto: 'Maya',
+ *  url: 'https://maya.yanbal.com' }) y devolver el paso al workflow. */
+export const RECORRIDOS = [];

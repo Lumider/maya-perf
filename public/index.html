@@ -579,7 +579,7 @@
   /* Sección 1 — Recorrido real (con sesión): el que midió la auditoría. Mientras no haya
      cuenta de prueba, un aviso explica cómo se activa. */
   CONT.append(el('h2', 'seccion', 'Recorrido real (con sesión)'));
-  CONT.append(el('p', 'seccion-desc', 'Login → Portal Maya (#/inicio) → clic «Realizar pedido» → Mis Reportes — el recorrido que midió la auditoría (línea base 37/50/52).'));
+  CONT.append(el('p', 'seccion-desc', 'Login → Portal Maya (#/inicio), medido ya autenticado — como lo vive la usuaria y como midió la auditoría (línea base 37/100 · LCP 17.9 s).'));
   if (conSesion) {
     const grid = el('div', 'recorridos');
     RECORRIDOS_SESION.forEach((r, i) => grid.append(cardRecorrido(r, COLORES[i])));
@@ -594,13 +594,15 @@
     CONT.append(c);
   }
 
-  /* Sección 2 — Entrada (sin sesión): lo que ve un visitante anónimo (rebote al login).
-     Sin comparación con la auditoría: ella midió el recorrido con sesión. */
-  CONT.append(el('h2', 'seccion', 'Entrada (sin sesión)'));
-  CONT.append(el('p', 'seccion-desc', 'Carga anónima de cada plataforma: TTFB, bundle de la pantalla de login y redirecciones frías. Sin línea base de la auditoría (ella midió con sesión).'));
-  const gridEntrada = el('div', 'recorridos');
-  RECORRIDOS.forEach((r, i) => gridEntrada.append(cardRecorrido(r, COLORES[i])));
-  CONT.append(gridEntrada);
+  /* Sección 2 — Entrada (sin sesión): solo aparece si está configurada en objetivos.mjs
+     (retirada en jul-2026 para concentrar el seguimiento en el recorrido real). */
+  if (RECORRIDOS.length > 0) {
+    CONT.append(el('h2', 'seccion', 'Entrada (sin sesión)'));
+    CONT.append(el('p', 'seccion-desc', 'Carga anónima de cada plataforma: TTFB, bundle de la pantalla de login y redirecciones frías. Sin línea base de la auditoría (ella midió con sesión).'));
+    const gridEntrada = el('div', 'recorridos');
+    RECORRIDOS.forEach((r, i) => gridEntrada.append(cardRecorrido(r, COLORES[i])));
+    CONT.append(gridEntrada);
+  }
 
   /* ===================== Tabla (acceso sin hover) ===================== */
   if (corridas.length > 0) {

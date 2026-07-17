@@ -12,18 +12,17 @@ publica un dashboard estático en GitHub Pages que responde una sola pregunta:
 Siempre con la **misma metodología de la auditoría** (perfil estándar de Lighthouse móvil:
 CPU 4× + 4G lenta simulada — sin throttling custom), en dos grupos:
 
-**1. Recorrido real (con sesión)** — el que midió la auditoría; requiere cuenta de prueba
+**Recorrido real (con sesión)** — requiere credenciales
 (ver [Activar el recorrido real](#activar-el-recorrido-real-con-sesión)):
 
 | Recorrido | Cómo se llega | Línea base jun-2026 |
 | --- | --- | --- |
 | Portal Maya | `maya.yanbal.com/#/inicio`, autenticado | 37/100 · LCP 17.9 s |
-| Realizar pedido | clic desde el portal (deriva a pedidos.yanbal.com) | 50/100 · LCP 15.8 s |
-| Mis Reportes | clic desde el portal (deriva a misreportes.yanbal.com) | 52/100 (solo el spinner) |
 
-**2. Entrada (sin sesión)** — la carga anónima de cada plataforma (rebote al login):
-TTFB, bundle de la pantalla de login y cadenas de redirección frías. Sin línea base
-(la auditoría no midió la entrada anónima).
+Por decisión de jul-2026 el seguimiento se concentra en `#/inicio`. Las derivaciones por
+clic («Realizar pedido» → pedidos.yanbal.com, «Mis Reportes» → misreportes.yanbal.com,
+líneas base 50 y 52) y la entrada anónima quedaron **desactivadas pero listas**: se
+reactivan descomentando/añadiendo sus recorridos en `public/datos/objetivos.mjs`.
 
 Metas de la auditoría: **LCP < 2.5 s** y **score > 50**. Cada punto del historial es la
 **mediana de varias corridas**. Además de las Web Vitals se registran las dos palancas P0:
@@ -46,9 +45,8 @@ flowchart TB
 
   subgraph medir ["Job «medir»"]
     MEDIR["Lighthouse móvil,<br/>perfil de la auditoría (CPU 4× + 4G lenta)"]
-    MEDIR --> ANON["Entrada (sin sesión):<br/>maya · pedidos · misreportes<br/>×3 corridas → mediana"]
-    MEDIR --> SES["Recorrido real (con sesión, si hay secrets):<br/>login → #/inicio → clic Realizar pedido<br/>→ clic Reportes · ×2 flujos → mediana"]
-    ANON & SES --> EXTRAE["Extrae: score, LCP, FCP, TBT, CLS,<br/>Speed Index, TTFB, peso,<br/>JS sin usar, redirecciones"]
+    MEDIR --> SES["Recorrido real (con sesión, si hay secrets):<br/>login → maya.yanbal.com/#/inicio<br/>×2 flujos → mediana"]
+    SES --> EXTRAE["Extrae: score, LCP, FCP, TBT, CLS,<br/>Speed Index, TTFB, peso,<br/>JS sin usar, redirecciones"]
     EXTRAE -->|"recorrido falló"| ERR["Se registra ok:false + código<br/>+ reporte/screenshot de diagnóstico"]
   end
 
@@ -74,28 +72,24 @@ partiendo de la línea base de la auditoría, cards con deltas (vs jun-2026 y vs
 anterior) y métricas coloreadas por los umbrales oficiales de Lighthouse.
 
 **2. Una entrada nueva en el historial JSON** (la "base de datos" es el propio repo).
-Ejemplo real — primera corrida, 15 jul 2026:
+Forma de cada corrida (valores ilustrativos):
 
 ```jsonc
 {
-  "fecha": "2026-07-15T17:41:03.618Z",
+  "fecha": "2026-07-17T15:15:00.000Z",
   "lighthouse": "12.8.2",
   "recorridos": {
-    "portal":   { "ok": true, "score": 50, "fcpMs": 5942, "lcpMs": 11049, "tbtMs": 431,
-                  "cls": 0, "speedIndexMs": 5942, "ttfbMs": 52, "pesoKb": 1511,
-                  "jsSinUsarKb": 470, "redireccionesMs": 0 },
-    "pedido":   { "ok": false, "error": "NO_FCP" },   // la página nunca pintó contenido
-    "reportes": { "ok": true, "score": 56, "fcpMs": 9777, "lcpMs": 11515, "tbtMs": 10,
-                  "cls": 0, "speedIndexMs": 9777, "ttfbMs": 216, "pesoKb": 2217,
-                  "jsSinUsarKb": 482, "redireccionesMs": 0 }
+    "inicio": { "ok": true, "score": 38, "fcpMs": 6100, "lcpMs": 17200, "tbtMs": 700,
+                "cls": 0.02, "speedIndexMs": 12100, "ttfbMs": 350, "pesoKb": 1600,
+                "jsSinUsarKb": 2100, "redireccionesMs": 0 }
+    // un recorrido que falla queda como { "ok": false, "error": "CODIGO" }
   }
 }
 ```
 
-Cómo leerlo: el portal tarda **11 s en mostrar contenido** (meta: 2.5 s) descargando
-**1.5 MB**, de los cuales **470 KB de JavaScript no se usan**; el servidor no es el
-problema (TTFB 52 ms) — consistente con el diagnóstico de la auditoría. Y `pedido`
-con `NO_FCP` es un hallazgo en sí: la entrada quedó en blanco sin pintar nada.
+Cómo leerlo contra la línea base (37/100 · LCP 17.9 s) y las metas (>50 · <2.5 s):
+score y LCP dicen si mejoramos; `jsSinUsarKb` y `redireccionesMs` siguen las dos
+palancas P0; `ttfbMs` separa "servidor lento" de "cliente lento".
 
 **3. Los reportes HTML completos de Lighthouse** como artifact del run (pestaña Actions,
 30 días): el detalle auditoría por auditoría con las oportunidades de mejora concretas,
