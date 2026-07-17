@@ -26,14 +26,14 @@
       "recorridos": {
         "inicio": {
           "ok": true,
-          "score": 39,
-          "fcpMs": 5309,
-          "lcpMs": 11881,
-          "tbtMs": 1035,
+          "score": 40,
+          "fcpMs": 6030,
+          "lcpMs": 11807,
+          "tbtMs": 890,
           "cls": 0,
-          "speedIndexMs": 5309,
-          "ttfbMs": 106,
-          "pesoKb": 1539,
+          "speedIndexMs": 6030,
+          "ttfbMs": 45,
+          "pesoKb": 1534,
           "jsSinUsarKb": 489,
           "redireccionesMs": 0
         },
