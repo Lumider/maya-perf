@@ -43,8 +43,16 @@ jobs:
       - run: npm ci
 
       # ubuntu-latest trae Chrome estable preinstalado; chrome-launcher lo autodetecta.
-      - name: Medir con Lighthouse
+      - name: Medir entrada (sin sesión)
         run: npm run perf
+
+      # Recorrido real de la auditoría (login → #/inicio → clics). El script decide solo:
+      # sin los secrets sale limpio con "desactivado" y el workflow sigue verde.
+      - name: Medir flujo con sesión (se activa con secrets)
+        env:
+          MAYA_USUARIO: ${{ secrets.MAYA_USUARIO }}
+          MAYA_CLAVE: ${{ secrets.MAYA_CLAVE }}
+        run: npm run perf:sesion
 
       - name: Subir reportes HTML de Lighthouse
         if: always()

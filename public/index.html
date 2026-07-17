@@ -17,9 +17,9 @@
     --eje: #c3c2b7;
     --borde: rgba(11, 11, 11, 0.1);
     /* series categóricas: portal / pedido / reportes (slots 1–3 validados) */
-    --s-portal: #2a78d6;
-    --s-pedido: #008300;
-    --s-reportes: #e87ba4;
+    --s-1: #2a78d6;
+    --s-2: #008300;
+    --s-3: #e87ba4;
     /* estados (reservados, nunca como serie) */
     --st-bueno: #0ca30c;
     --st-alerta: #fab219;
@@ -54,9 +54,9 @@
     --grid: #2c2c2a;
     --eje: #383835;
     --borde: rgba(255, 255, 255, 0.1);
-    --s-portal: #3987e5;
-    --s-pedido: #008300;
-    --s-reportes: #d55181;
+    --s-1: #3987e5;
+    --s-2: #008300;
+    --s-3: #d55181;
     --delta-bueno: #0ca30c;
   }
 
@@ -106,7 +106,9 @@
   .tooltip .fila b { margin-left: auto; font-variant-numeric: tabular-nums; }
   .tooltip .fila span { color: var(--ink-2); }
 
-  /* ==== Cards por recorrido ==== */
+  /* ==== Secciones y cards por recorrido ==== */
+  h2.seccion { font-size: 16px; margin: 26px 0 4px; }
+  p.seccion-desc { color: var(--ink-mute); font-size: 12.5px; margin: 0 0 12px; }
   .recorridos { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
   .rec { background: var(--surface); border: 1px solid var(--borde); border-radius: 14px; padding: 16px 18px; }
   .rec .encima { display: flex; align-items: center; gap: 8px; }
@@ -180,9 +182,9 @@
   <footer class="notas">
     <strong>Notas metodológicas</strong>
     <ul>
-      <li>Se mide <em>sin sesión</em>: cada recorrido captura su entrada real — cadena de redirecciones de login (Azure AD B2C) incluida, uno de los P0 de la auditoría. El interior post-login no se mide aquí.</li>
+      <li><strong>Recorrido real (con sesión)</strong>: el robot inicia sesión con la cuenta de prueba y mide el Portal (#/inicio) y las derivaciones por clic a Pedido y Reportes — el mismo camino que la auditoría (líneas base 37/50/52). <strong>Entrada (sin sesión)</strong>: la carga anónima de cada plataforma (rebote al login), sin línea base comparable.</li>
       <li>En <em>Mis Reportes</em>, Lighthouse solo ve el spinner: el reporte SSRS real no cargó en &gt;90 s en la auditoría. La meta «reporte &lt; 5 s» requiere medición de campo.</li>
-      <li>TBT es la métrica más ruidosa en CI: leer tendencias, no puntos sueltos. Cada punto ya es la mediana de 3 corridas.</li>
+      <li>TBT es la métrica más ruidosa en CI: leer tendencias, no puntos sueltos. Cada punto ya es la mediana de varias corridas.</li>
       <li>Perfil y recorridos se editan en <code>public/datos/objetivos.mjs</code>; los reportes HTML completos de cada corrida quedan como artifact del workflow.</li>
     </ul>
   </footer>
@@ -191,7 +193,7 @@
 <div class="tooltip" id="tooltip" role="status"></div>
 
 <script type="module">
-  import { RECORRIDOS, METAS } from './datos/objetivos.mjs';
+  import { RECORRIDOS, RECORRIDOS_SESION, METAS } from './datos/objetivos.mjs';
 
   /* ==== Tema: auto → claro → oscuro (persistido con valores canónicos light/dark) ==== */
   const btnTema = document.getElementById('btn-tema');
@@ -212,7 +214,8 @@
 
   const CONT = document.getElementById('contenido');
   const META_CORRIDA = document.getElementById('meta-corrida');
-  const COLOR_SERIE = { portal: 'var(--s-portal)', pedido: 'var(--s-pedido)', reportes: 'var(--s-reportes)' };
+  /* 3 slots categóricos validados; cada sección (sesión / entrada) los reutiliza por índice. */
+  const COLORES = ['var(--s-1)', 'var(--s-2)', 'var(--s-3)'];
 
   const fmtFecha = (iso, largo = false) =>
     new Date(iso).toLocaleDateString('es-PE', largo
@@ -262,25 +265,41 @@
     c.append(
       el('div', 'icono', '⏱️'),
       el('h2', null, 'Aún no hay mediciones'),
-      el('p', null, 'El workflow diario irá acumulando corridas aquí. Abajo queda la línea base de la auditoría de junio 2026 como punto de partida.'),
+      el('p', null, 'El workflow diario irá acumulando corridas aquí.'),
     );
     CONT.append(c);
   }
 
   /* ======================= Gráfica de tendencia ======================= */
-  /* La línea base de la auditoría (jun 2026, misma metodología) se antepone como
-     primer punto real de cada serie, para que la pregunta del dashboard —
-     «¿mejoramos desde la auditoría?» — se lea directamente en la línea. */
-  const puntosX = [{ etiqueta: 'Auditoría jun 2026', esBase: true }, ...corridas.map((c) => ({ etiqueta: fmtFecha(c.fecha), fecha: c.fecha }))];
-  const series = RECORRIDOS.map((r) => ({
+  /* Prioriza el recorrido REAL (con sesión): cuando exista data suya, se grafica con la
+     línea base de la auditoría (misma metodología) antepuesta como primer punto, para que
+     «¿mejoramos desde la auditoría?» se lea directamente en la línea. Mientras el flujo
+     con sesión esté apagado, se grafica la entrada anónima — sin línea base, porque la
+     auditoría no midió la entrada sin sesión y compararlas sería engañoso. */
+  const tieneDatos = (grupo) => corridas.some((c) => grupo.some((r) => c.recorridos[r.codigo]));
+  const conSesion = tieneDatos(RECORRIDOS_SESION);
+  const grupoGrafica = conSesion ? RECORRIDOS_SESION : RECORRIDOS;
+  const usaBase = conSesion;
+
+  const puntosX = [
+    ...(usaBase ? [{ etiqueta: 'Auditoría jun 2026', esBase: true }] : []),
+    ...corridas.map((c) => ({ etiqueta: fmtFecha(c.fecha), fecha: c.fecha })),
+  ];
+  const series = grupoGrafica.map((r, i) => ({
     ...r,
-    color: COLOR_SERIE[r.codigo],
-    valores: [r.base.score, ...corridas.map((c) => (c.recorridos[r.codigo]?.ok ? c.recorridos[r.codigo].score : null))],
+    color: COLORES[i],
+    valores: [
+      ...(usaBase ? [r.base?.score ?? null] : []),
+      ...corridas.map((c) => (c.recorridos[r.codigo]?.ok ? c.recorridos[r.codigo].score : null)),
+    ],
   }));
 
   if (puntosX.length >= 1) {
     const card = el('div', 'card');
-    card.append(el('h2', null, 'Puntaje de performance (móvil) por recorrido'), el('p', 'desc', `Mediana de 3 corridas por punto · meta de la auditoría: > ${METAS.score}`));
+    card.append(
+      el('h2', null, `Puntaje de performance (móvil) — ${conSesion ? 'recorrido real (con sesión)' : 'entrada (sin sesión)'}`),
+      el('p', 'desc', `Mediana de varias corridas por punto · meta de la auditoría: > ${METAS.score}`),
+    );
 
     const leyenda = el('div', 'leyenda');
     for (const s of series) {
@@ -324,6 +343,8 @@
     const cadaX = Math.max(1, Math.ceil((puntosX.length - 1) / 6));
     puntosX.forEach((p, i) => {
       if (i !== 0 && i !== puntosX.length - 1 && i % cadaX !== 0) return;
+      // Evita que un tick regular se monte sobre la etiqueta ancha de la auditoría.
+      if (usaBase && i !== 0 && x(i) - x(0) < 160) return;
       const t = S('text', { x: x(i), y: ALTO - 12, 'text-anchor': i === 0 ? 'start' : 'middle', fill: p.esBase ? 'var(--ink-2)' : 'var(--ink-mute)', 'font-size': 11, 'font-weight': p.esBase ? 600 : 400 });
       t.textContent = p.etiqueta;
       svg.append(t);
@@ -360,7 +381,7 @@
       const clave = S('line', { x1: f.ux + 8, x2: f.ux + 20, y1: f.uy, y2: f.uy, 'stroke-width': 2 });
       clave.style.stroke = f.s.color;
       const t = S('text', { x: f.ux + 24, y: f.uy + 4, fill: 'var(--ink)', 'font-size': 12, 'font-weight': 600 });
-      t.textContent = `${f.v} · ${f.s.nombre}`;
+      t.textContent = `${f.v} · ${f.s.corto ?? f.s.nombre}`;
       g.append(clave, t);
       svg.append(g);
     }
@@ -381,7 +402,7 @@
       cruz.setAttribute('x1', px); cruz.setAttribute('x2', px);
       cruz.setAttribute('visibility', 'visible');
       tooltip.replaceChildren();
-      tooltip.append(el('div', 'cuando', puntosX[idx].esBase ? 'Auditoría · jun 2026 (línea base)' : fmtFecha(corridas[idx - 1].fecha, true)));
+      tooltip.append(el('div', 'cuando', puntosX[idx].esBase ? 'Auditoría · jun 2026 (línea base)' : fmtFecha(corridas[idx - (usaBase ? 1 : 0)].fecha, true)));
       for (const s of series) {
         const v = s.valores[idx];
         const fila = el('div', 'fila');
@@ -421,7 +442,6 @@
   }
 
   /* ========================= Cards por recorrido ========================= */
-  const gridRec = el('div', 'recorridos');
   const anterior = corridas.at(-2);
 
   const deltaTexto = (actual, previo, invertir = false) => {
@@ -432,21 +452,34 @@
     return { txt: `${d > 0 ? '+' : '−'}${Math.abs(d)}`, clase: bueno ? 'sube' : 'baja' };
   };
 
-  for (const r of RECORRIDOS) {
+  const cardRecorrido = (r, color) => {
     const card = el('article', 'rec');
     const encima = el('div', 'encima');
     const h = el('h3');
     const puntito = el('span', 'puntito');
-    puntito.style.background = COLOR_SERIE[r.codigo];
+    puntito.style.background = color;
     h.append(puntito, document.createTextNode(r.nombre));
     encima.append(h);
     card.append(encima);
-    const url = el('p', 'url', r.url.replace('https://', ''));
-    card.append(url);
+    card.append(el('p', 'url', (r.url ?? 'clic desde el portal').replace('https://', '')));
 
     const medicion = ultima?.recorridos[r.codigo];
     const score = medicion?.ok ? medicion.score : null;
-    const mostrado = score ?? r.base.score; // sin corridas aún: se muestra la línea base
+    // Última medición válida como respaldo cuando la corrida más reciente falló.
+    const fuente = medicion?.ok
+      ? medicion
+      : [...corridas].reverse().map((c) => c.recorridos[r.codigo]).find((m) => m?.ok);
+    const mostrado = score ?? fuente?.score ?? null;
+
+    if (medicion && medicion.ok === false) {
+      const aviso = el('div', 'aviso-error');
+      aviso.append(document.createTextNode('⚠︎'), el('span', null, `No se pudo medir en la última corrida (${medicion.error})`));
+      card.append(aviso);
+    }
+    if (mostrado == null) {
+      card.append(el('p', 'nota-base', 'Sin mediciones aún.'));
+      return card;
+    }
 
     // Anillo de score (estado = color + etiqueta de banda, nunca color solo)
     const principal = el('div', 'principal');
@@ -470,7 +503,8 @@
 
     const deltas = el('div', 'deltas');
     if (score != null) {
-      const dBase = deltaTexto(score, r.base.score);
+      // Delta vs auditoría solo en el grupo con línea base (recorrido real con sesión).
+      const dBase = r.base ? deltaTexto(score, r.base.score) : null;
       if (dBase) {
         const fila = el('div');
         const num = el('span', `delta-num ${dBase.clase}`, dBase.txt);
@@ -501,21 +535,14 @@
       spark.innerHTML =
         `<svg width="${w}" height="${hSp}" viewBox="0 0 ${w} ${hSp}" aria-hidden="true">` +
         `<path d="${d}" fill="none" stroke="var(--ink-mute)" stroke-width="1.5" stroke-linejoin="round"/>` +
-        `<circle cx="${sx(fin)}" cy="${sy(valores[fin])}" r="3.5" fill="${COLOR_SERIE[r.codigo]}" stroke="var(--surface)" stroke-width="2"/>` +
+        `<circle cx="${sx(fin)}" cy="${sy(valores[fin])}" r="3.5" fill="${color}" stroke="var(--surface)" stroke-width="2"/>` +
         `</svg>`;
       lado.append(spark);
     }
     principal.append(lado);
     card.append(principal);
 
-    if (medicion && medicion.ok === false) {
-      const aviso = el('div', 'aviso-error');
-      aviso.append(document.createTextNode('⚠︎'), el('span', null, `No se pudo medir en la última corrida (${medicion.error})`));
-      card.append(aviso);
-    }
-
-    // Métricas de la última medición válida (o nada si nunca midió)
-    const fuente = medicion?.ok ? medicion : [...corridas].reverse().map((c) => c.recorridos[r.codigo]).find((m) => m?.ok);
+    // Métricas de la última medición válida
     if (fuente) {
       const grid = el('div', 'metricas');
       const filas = [
@@ -545,10 +572,35 @@
       card.append(grid);
     }
 
-    if (score == null) card.append(el('p', 'nota-base', fuente ? 'Mostrando la última medición válida.' : 'Valores de la línea base de la auditoría (jun 2026); aún sin corridas propias.'));
-    gridRec.append(card);
+    if (score == null && fuente) card.append(el('p', 'nota-base', 'Mostrando la última medición válida.'));
+    return card;
+  };
+
+  /* Sección 1 — Recorrido real (con sesión): el que midió la auditoría. Mientras no haya
+     cuenta de prueba, un aviso explica cómo se activa. */
+  CONT.append(el('h2', 'seccion', 'Recorrido real (con sesión)'));
+  CONT.append(el('p', 'seccion-desc', 'Login → Portal Maya (#/inicio) → clic «Realizar pedido» → Mis Reportes — el recorrido que midió la auditoría (línea base 37/50/52).'));
+  if (conSesion) {
+    const grid = el('div', 'recorridos');
+    RECORRIDOS_SESION.forEach((r, i) => grid.append(cardRecorrido(r, COLORES[i])));
+    CONT.append(grid);
+  } else {
+    const c = el('div', 'card vacio');
+    c.append(
+      el('div', 'icono', '🔐'),
+      el('h2', null, 'Pendiente de activación'),
+      el('p', null, 'Requiere una cuenta de prueba: se activa agregando los secrets MAYA_USUARIO y MAYA_CLAVE en el repositorio (Settings → Secrets and variables → Actions). Desde entonces, cada corrida diaria medirá también este recorrido.'),
+    );
+    CONT.append(c);
   }
-  CONT.append(gridRec);
+
+  /* Sección 2 — Entrada (sin sesión): lo que ve un visitante anónimo (rebote al login).
+     Sin comparación con la auditoría: ella midió el recorrido con sesión. */
+  CONT.append(el('h2', 'seccion', 'Entrada (sin sesión)'));
+  CONT.append(el('p', 'seccion-desc', 'Carga anónima de cada plataforma: TTFB, bundle de la pantalla de login y redirecciones frías. Sin línea base de la auditoría (ella midió con sesión).'));
+  const gridEntrada = el('div', 'recorridos');
+  RECORRIDOS.forEach((r, i) => gridEntrada.append(cardRecorrido(r, COLORES[i])));
+  CONT.append(gridEntrada);
 
   /* ===================== Tabla (acceso sin hover) ===================== */
   if (corridas.length > 0) {
@@ -559,15 +611,19 @@
     const tabla = el('table');
     const thead = el('thead');
     const trh = el('tr');
+    // Columnas solo para los recorridos que ya tienen algún dato (sesión y/o entrada).
+    const columnas = [...RECORRIDOS_SESION, ...RECORRIDOS].filter((r) =>
+      corridas.some((c) => c.recorridos[r.codigo]),
+    );
     trh.append(el('th', null, 'Fecha'));
-    for (const r of RECORRIDOS) for (const m of ['score', 'LCP', 'TTFB']) trh.append(el('th', null, `${r.nombre} · ${m}`));
+    for (const r of columnas) for (const m of ['score', 'LCP', 'TTFB']) trh.append(el('th', null, `${r.corto ?? r.nombre} · ${m}`));
     thead.append(trh);
     tabla.append(thead);
     const tbody = el('tbody');
     for (const c of [...corridas].reverse()) {
       const tr = el('tr');
       tr.append(el('td', null, fmtFecha(c.fecha, true)));
-      for (const r of RECORRIDOS) {
+      for (const r of columnas) {
         const m = c.recorridos[r.codigo];
         if (m?.ok) {
           tr.append(el('td', null, String(m.score)), el('td', null, fmtMs(m.lcpMs)), el('td', null, fmtMs(m.ttfbMs)));

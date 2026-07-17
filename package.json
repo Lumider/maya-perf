@@ -8,10 +8,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "perf": "node scripts/lighthouse-maya.mjs"
+    "perf": "node scripts/lighthouse-maya.mjs",
+    "perf:sesion": "node scripts/flujo-sesion.mjs"
   },
   "devDependencies": {
     "chrome-launcher": "^1.2.1",
-    "lighthouse": "^12.8.2"
+    "lighthouse": "^12.8.2",
+    "puppeteer-core": "^25.3.0"
   }
 }

@@ -9,18 +9,24 @@ publica un dashboard estático en GitHub Pages que responde una sola pregunta:
 
 ## Qué mide
 
-Los 3 recorridos de la auditoría, con su **misma metodología** (perfil estándar de
-Lighthouse móvil: CPU 4× + 4G lenta simulada — sin throttling custom, para que cada
-corrida sea comparable con la línea base):
+Siempre con la **misma metodología de la auditoría** (perfil estándar de Lighthouse móvil:
+CPU 4× + 4G lenta simulada — sin throttling custom), en dos grupos:
 
-| Recorrido | URL | Línea base jun-2026 |
+**1. Recorrido real (con sesión)** — el que midió la auditoría; requiere cuenta de prueba
+(ver [Activar el recorrido real](#activar-el-recorrido-real-con-sesión)):
+
+| Recorrido | Cómo se llega | Línea base jun-2026 |
 | --- | --- | --- |
-| Ingresar a Maya | maya.yanbal.com | 37/100 · LCP 17.9 s |
-| Pase de Pedido | pedidos.yanbal.com | 50/100 · LCP 15.8 s |
-| Mis Reportes | misreportes.yanbal.com | 52/100 (solo el spinner) |
+| Portal Maya | `maya.yanbal.com/#/inicio`, autenticado | 37/100 · LCP 17.9 s |
+| Realizar pedido | clic desde el portal (deriva a pedidos.yanbal.com) | 50/100 · LCP 15.8 s |
+| Mis Reportes | clic desde el portal (deriva a misreportes.yanbal.com) | 52/100 (solo el spinner) |
+
+**2. Entrada (sin sesión)** — la carga anónima de cada plataforma (rebote al login):
+TTFB, bundle de la pantalla de login y cadenas de redirección frías. Sin línea base
+(la auditoría no midió la entrada anónima).
 
 Metas de la auditoría: **LCP < 2.5 s** y **score > 50**. Cada punto del historial es la
-**mediana de 3 corridas**. Además de las Web Vitals se registran las dos palancas P0:
+**mediana de varias corridas**. Además de las Web Vitals se registran las dos palancas P0:
 **JS sin usar** y **tiempo en cadenas de redirección** de login.
 
 La misma URL sirve a México, Perú, Bolivia y Guatemala (el país se elige dentro de la
@@ -38,13 +44,12 @@ flowchart TB
   CRON --> MEDIR
   MANUAL --> MEDIR
 
-  subgraph medir ["Job «medir» (~3 min)"]
-    MEDIR["Lighthouse móvil, perfil de la auditoría<br/>(CPU 4× + 4G lenta), como visitante anónimo"]
-    MEDIR --> R1["maya.yanbal.com<br/>×3 corridas → mediana"]
-    MEDIR --> R2["pedidos.yanbal.com<br/>×3 corridas → mediana"]
-    MEDIR --> R3["misreportes.yanbal.com<br/>×3 corridas → mediana"]
-    R1 & R2 & R3 --> EXTRAE["Extrae: score, LCP, FCP, TBT, CLS,<br/>Speed Index, TTFB, peso,<br/>JS sin usar, redirecciones"]
-    EXTRAE -->|"recorrido falló"| ERR["Se registra ok:false + código<br/>(no rompe los demás)"]
+  subgraph medir ["Job «medir»"]
+    MEDIR["Lighthouse móvil,<br/>perfil de la auditoría (CPU 4× + 4G lenta)"]
+    MEDIR --> ANON["Entrada (sin sesión):<br/>maya · pedidos · misreportes<br/>×3 corridas → mediana"]
+    MEDIR --> SES["Recorrido real (con sesión, si hay secrets):<br/>login → #/inicio → clic Realizar pedido<br/>→ clic Reportes · ×2 flujos → mediana"]
+    ANON & SES --> EXTRAE["Extrae: score, LCP, FCP, TBT, CLS,<br/>Speed Index, TTFB, peso,<br/>JS sin usar, redirecciones"]
+    EXTRAE -->|"recorrido falló"| ERR["Se registra ok:false + código<br/>+ reporte/screenshot de diagnóstico"]
   end
 
   EXTRAE --> HIST["📄 public/datos/perf-historial.json<br/>+1 corrida → commit a main"]
@@ -98,16 +103,34 @@ para cuando Ingeniería quiera profundizar en un punto de la tendencia.
 
 ### Limitaciones (honestidad metodológica)
 
-- Se mide **sin sesión** (Azure AD B2C): cada recorrido captura su entrada real —
-  redirecciones de login incluidas — pero no el interior post-login.
+- Hasta activar la cuenta de prueba, solo se mide la **entrada sin sesión**; el interior
+  post-login (el `#/inicio` real) espera los secrets.
 - En **Mis Reportes**, Lighthouse solo ve el spinner; el reporte SSRS real no cargó en
   >90 s en la auditoría. La meta «reporte < 5 s» requiere medición de campo.
 - TBT es la métrica más ruidosa en CI: leer tendencias, no puntos sueltos.
 
+## Activar el recorrido real (con sesión)
+
+1. Pedir una **cuenta de prueba** de Maya (con el equipo de seguridad de Yanbal; idealmente
+   exenta de MFA/captcha y con datos ficticios). **Nunca usar una cuenta personal de
+   producción**: sus credenciales correrían en un CI y sus datos aparecerían en los reportes.
+2. En el repo: **Settings → Secrets and variables → Actions → New repository secret**, crear
+   `MAYA_USUARIO` y `MAYA_CLAVE` con las credenciales.
+3. Disparar el workflow (Actions → Perf Lighthouse → Run workflow). Desde entonces el cron
+   diario mide también este grupo, y el dashboard muestra los deltas vs la auditoría.
+4. Si el login automatizado falla (formulario B2C distinto a los selectores por defecto),
+   el error queda en el historial y hay screenshot en el artifact — se ajustan los
+   selectores en `public/datos/objetivos.mjs` (`SESION.selectores`). Una iteración de
+   ajuste en la primera activación es esperable.
+5. Al activar, reevaluar si el repo debería pasar a **privado** (las métricas pasarían a
+   describir pantallas internas).
+
 ## Estructura
 
 ```
-scripts/lighthouse-maya.mjs     # runner: N corridas × recorrido, mediana, historial
+scripts/lighthouse-maya.mjs     # runner de la entrada anónima: N corridas, mediana
+scripts/flujo-sesion.mjs        # recorrido real con sesión (Lighthouse user flows)
+scripts/metricas.mjs            # extracción de métricas + historial (compartido)
 public/datos/objetivos.mjs      # config compartida runner+dashboard: recorridos, metas, línea base
 public/datos/perf-historial.json# historial commiteado por el workflow (tope 400 corridas)
 public/index.html               # dashboard estático (GitHub Pages)
@@ -118,13 +141,15 @@ public/index.html               # dashboard estático (GitHub Pages)
 
 ```bash
 npm ci
-npm run perf                                   # los 3 recorridos, 3 corridas c/u
+npm run perf                                     # entrada anónima: 3 recorridos × 3 corridas
 npm run perf -- --recorrido portal --corridas 1  # prueba rápida
+MAYA_USUARIO=u MAYA_CLAVE=c npm run perf:sesion  # recorrido real (requiere credenciales)
 npx http-server public   # (o python3 -m http.server -d public) para ver el dashboard
 ```
 
 Los reportes HTML completos de Lighthouse quedan en `reportes/` (local) y como artifact
-del workflow (30 días).
+del workflow (30 días); los recorridos fallidos dejan `reportes/<codigo>-fallo.*` para
+diagnóstico.
 
 ## Operación
 

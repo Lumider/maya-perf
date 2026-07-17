@@ -1,11 +1,13 @@
 /**
- * Runner de Lighthouse contra Maya en producción (seguimiento de la auditoría jun-2026).
+ * Runner de Lighthouse contra la ENTRADA anónima de Maya (sin sesión).
  *
- * Corre N veces cada recorrido de `objetivos.mjs`, toma la corrida MEDIANA (utilidad
- * oficial de Lighthouse, más robusta que promediar métricas sueltas) y añade una entrada
- * al historial `public/datos/perf-historial.json`, que el dashboard (public/index.html)
- * consume como asset estático. Los reportes HTML de la corrida mediana quedan en
- * `reportes/` (gitignored — el workflow los sube como artifact para diagnóstico profundo).
+ * Corre N veces cada recorrido de `objetivos.mjs` (grupo RECORRIDOS), toma la corrida
+ * MEDIANA (utilidad oficial de Lighthouse, más robusta que promediar métricas sueltas) y
+ * añade una entrada al historial `public/datos/perf-historial.json`, que el dashboard
+ * (public/index.html) consume como asset estático. Los reportes HTML de la corrida mediana
+ * quedan en `reportes/` (gitignored — el workflow los sube como artifact).
+ *
+ * El recorrido REAL con sesión (login → #/inicio → clics) vive en `flujo-sesion.mjs`.
  *
  * Uso:
  *   npm run perf                                  # los 3 recorridos, 3 corridas c/u
@@ -14,27 +16,22 @@
  *                                                 # prueba rápida / camino de error
  *
  * Un recorrido que falla (WAF, timeout, challenge al runner) se registra como
- * `{ ok: false, error }` sin abortar los demás; el proceso solo sale con código ≠ 0
- * si fallan TODOS (así el workflow queda en rojo cuando no se midió nada).
+ * `{ ok: false, error }` sin abortar los demás — y deja reporte+screenshot de diagnóstico
+ * en `reportes/<codigo>-fallo.*`. El proceso solo sale con código ≠ 0 si fallan TODOS.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { launch } from 'chrome-launcher';
 import lighthouse from 'lighthouse';
 import { computeMedianRun } from 'lighthouse/core/lib/median-run.js';
-// La config vive en public/datos/ porque el dashboard (index.html) importa el MISMO
-// módulo: una única fuente de verdad para recorridos, metas y línea base.
+import { CORRIDAS_POR_RECORRIDO, RECORRIDOS } from '../public/datos/objetivos.mjs';
 import {
-  CORRIDAS_POR_RECORRIDO,
-  MAX_CORRIDAS_HISTORIAL,
-  RECORRIDOS,
-} from '../public/datos/objetivos.mjs';
-
-const RAIZ = dirname(dirname(fileURLToPath(import.meta.url)));
-const HISTORIAL = `${RAIZ}/public/datos/perf-historial.json`;
-const REPORTES = `${RAIZ}/reportes`;
+  HISTORIAL,
+  REPORTES,
+  extraerMetricas,
+  guardarDiagnosticoFallo,
+  guardarEnHistorial,
+} from './metricas.mjs';
 
 const { values: args } = parseArgs({
   options: {
@@ -58,28 +55,6 @@ const CONFIG_LH = {
   settings: { onlyCategories: ['performance'], formFactor: 'mobile' },
 };
 
-/** Extrae del LHR mediano las métricas que sigue el dashboard. Además de las Web Vitals,
- *  incluye las dos palancas P0 de la auditoría: JS sin usar y tiempo en redirecciones. */
-function extraerMetricas(lhr) {
-  const audit = (id) => lhr.audits[id]?.numericValue;
-  const ms = (id) => Math.round(audit(id) ?? 0);
-  return {
-    ok: true,
-    score: Math.round((lhr.categories.performance.score ?? 0) * 100),
-    fcpMs: ms('first-contentful-paint'),
-    lcpMs: ms('largest-contentful-paint'),
-    tbtMs: ms('total-blocking-time'),
-    cls: Math.round((audit('cumulative-layout-shift') ?? 0) * 1000) / 1000,
-    speedIndexMs: ms('speed-index'),
-    ttfbMs: ms('server-response-time'),
-    pesoKb: Math.round((audit('total-byte-weight') ?? 0) / 1024),
-    jsSinUsarKb: Math.round(
-      (lhr.audits['unused-javascript']?.details?.overallSavingsBytes ?? 0) / 1024,
-    ),
-    redireccionesMs: Math.round(lhr.audits['redirects']?.details?.overallSavingsMs ?? 0),
-  };
-}
-
 /** Corre Lighthouse `corridas` veces contra `url` y devuelve la medición del recorrido. */
 async function medirRecorrido(chrome, recorrido, url, corridas) {
   const exitosas = [];
@@ -95,6 +70,7 @@ async function medirRecorrido(chrome, recorrido, url, corridas) {
       const lhr = resultado?.lhr;
       if (!lhr || lhr.runtimeError || lhr.categories.performance.score == null) {
         ultimoError = lhr?.runtimeError?.code ?? 'SIN_SCORE';
+        guardarDiagnosticoFallo(recorrido.codigo, lhr, resultado?.report?.[0]);
         continue;
       }
       exitosas.push({ lhr, html: resultado.report[0] });
@@ -112,20 +88,6 @@ async function medirRecorrido(chrome, recorrido, url, corridas) {
   mkdirSync(REPORTES, { recursive: true });
   writeFileSync(`${REPORTES}/${recorrido.codigo}.html`, mediana.html);
   return { metricas: extraerMetricas(mediana.lhr), version: mediana.lhr.lighthouseVersion };
-}
-
-/** Añade la corrida al historial commiteado, recortando al tope configurado. */
-function guardarEnHistorial(entrada) {
-  let historial = { version: 1, corridas: [] };
-  try {
-    historial = JSON.parse(readFileSync(HISTORIAL, 'utf8'));
-  } catch {
-    // Primer uso: se crea el archivo desde cero.
-  }
-  historial.corridas.push(entrada);
-  historial.corridas = historial.corridas.slice(-MAX_CORRIDAS_HISTORIAL);
-  mkdirSync(dirname(HISTORIAL), { recursive: true });
-  writeFileSync(HISTORIAL, JSON.stringify(historial, null, 2) + '\n');
 }
 
 const recorridos = args.recorrido
@@ -167,11 +129,7 @@ try {
     }
   }
 
-  guardarEnHistorial({
-    fecha: new Date().toISOString(),
-    lighthouse: version || 'desconocida',
-    recorridos: mediciones,
-  });
+  guardarEnHistorial(mediciones, version);
   console.log(`Historial actualizado: ${HISTORIAL}`);
 
   if (Object.values(mediciones).every((r) => r.ok === false)) {
