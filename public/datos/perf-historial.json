@@ -939,6 +939,29 @@
           "error": "SELECTOR_NO_ENCONTRADO: a#PEDI | a[href*=\"pedidos.yanbal\"] | ::-p-text(Realizar Pedido)"
         }
       }
+    },
+    {
+      "fecha": "2026-08-28T00:27:03.392Z",
+      "lighthouse": "12.8.2",
+      "recorridos": {
+        "inicio": {
+          "ok": true,
+          "score": 44,
+          "fcpMs": 6556,
+          "lcpMs": 13048,
+          "tbtMs": 575,
+          "cls": 0,
+          "speedIndexMs": 6556,
+          "ttfbMs": 110,
+          "pesoKb": 1772,
+          "jsSinUsarKb": 471,
+          "redireccionesMs": 0
+        },
+        "pedido-real": {
+          "ok": false,
+          "error": "SELECTOR_NO_ENCONTRADO: a#PEDI | a[href*=\"pedidos.yanbal\"] | ::-p-text(Realizar Pedido)"
+        }
+      }
     }
   ]
 }
